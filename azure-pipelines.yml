@@ -1,0 +1,125 @@
+trigger:
+  branches:
+    include:
+      - main
+      
+variables:
+  - name: TF_version
+    value: '1.9.5'
+  - name: Workspace
+    value: 'Release'
+
+stages:
+  - stage: Terraform_Validate
+    displayName: 'Terraform Validate code'
+    jobs:
+      - job: Validate
+        displayName: 'Validate Terraform Configuration'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@0
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: '$(TF_version)'
+
+          - script: |
+              terraform init
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              commands: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/$(Workspace)'
+
+          - script: |
+              terraform validate
+            displayName: 'Terraform Validate'
+            inputs:
+              provider: 'azurerm'
+              commands: 'validate'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/$(Workspace)'
+
+  - stage: Terraform_Plan
+    displayName: 'Terraform Planification code'
+    dependsOn: Terraform_Validate
+    jobs:
+      - job: Plan
+        displayName: 'Plan Terraform Deployment'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@0
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: '$(TF_version)'
+
+          - script: |
+              terraform init
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              commands: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/$(Workspace)'
+              backendserviceArm: 'azure-connexion-dev'
+              backendAzureRmResourceGroupName: 'infra'
+              backendAzureRmStorageAccountName: 'mssoftwareinfra'
+              backendAzureRmContainerName: 'tfstate'
+              backendAzureRmKey: 'terraform.tfstate'
+
+          - script: |
+              terraform plan -out=tfplan
+            displayName: 'Terraform Plan'
+            inputs:
+              provider: 'azurerm'
+              commands: 'plan'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/$(Workspace)'
+              environmentServiceNameAzureRM: 'azure-connexion-dev'
+  
+  - stage: Terraform_Apply
+    displayName: 'Terraform Apply code'
+    dependsOn: Terraform_Plan
+    condition: succeeded()
+    jobs:
+      - job: Apply
+        displayName: 'Apply Terraform Deployment'
+        environnement: 'Dev'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+              - checkout: self
+
+              - task: TerraformInstaller@0
+                displayName: 'Install Terraform'
+                inputs:
+                  terraformVersion: '$(TF_version)'
+
+              - script: |
+                  terraform init
+                displayName: 'Terraform Init'
+                inputs:
+                  provider: 'azurerm'
+                  commands: 'init'
+                  workingDirectory: '$(System.DefaultWorkingDirectory)/$(Workspace)'
+                  backendserviceArm: 'azure-connexion-dev'
+                  backendAzureRmResourceGroupName: 'infra'
+                  backendAzureRmStorageAccountName: 'mssoftwareinfra'
+                  backendAzureRmContainerName: 'tfstate'
+                  backendAzureRmKey: 'terraform.tfstate'
+
+              - script: |
+                  terraform apply -auto-approve tfplan
+                displayName: 'Terraform Apply'
+                inputs:
+                  provider: 'azurerm'
+                  commands: 'apply'
+                  workingDirectory: '$(System.DefaultWorkingDirectory)/$(Workspace)'
+                  environmentServiceNameAzureRM: 'azure-connexion-dev'
+                  ensurebackend: true
+                  allowTelemetryCollection: false
